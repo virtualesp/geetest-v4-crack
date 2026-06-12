@@ -6,7 +6,7 @@ pip3 install pycryptodome PyExecJS requests rsa flask loguru
 pip install numpy opencv-python onnxruntime torch torchvision
 
 # 服务器安装
-pip install numpy opencv-python-headless onnxruntime torch torchvision
+pip install numpy opencv-python-headless onnxruntime torch torchvision requests pycryptodome flask loguru PyExecJS2
 
 # Node JS 依赖
 npm install
