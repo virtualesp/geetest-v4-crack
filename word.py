@@ -1,11 +1,7 @@
-# -*- coding: utf-8 -*-
-"""
-#该代码仅供学习参考使用，请勿使用于违法用途
 
-"""
 import sys
 import os
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import requests
 import json
@@ -20,6 +16,17 @@ import binascii
 from loguru import logger
 from util.get_key_lot import extract_dynamic_params, compute_lot_dict
 from util.word_siamese import WordMatcher
+
+# ============ 国际版(botion) 配置 ============
+LOAD_DOMAIN = "bcaptcha.botion.com"
+STATIC_DOMAIN = "static.botion.com"
+JS_FILENAME = "bcaptcha.js"
+REFERER = "https://bcaptcha.botion.com/"
+LANG = "zh-cn"
+STATIC_BASE_URL = f"https://{STATIC_DOMAIN}/"
+LOAD_URL = f"https://{LOAD_DOMAIN}/load"
+VERIFY_URL = f"https://{LOAD_DOMAIN}/verify"
+# =============================================
 
 DYNAMIC_KV, DYNAMIC_RULES = {}, {}
 session = requests.session()
@@ -61,8 +68,8 @@ def get_w(data, captcha_id):
     lot_number = data['lot_number']
     sign = get_sign(lot_number, captcha_id, data['pow_detail']['hashfunc'],
                     data['pow_detail']['version'], data['pow_detail']['bits'], data['pow_detail']['datetime'])
-    base_url = "https://static.geetest.com/"
-    result = word_matcher.match_words(base_url + data['imgs'], data['ques'])
+    bg_url = STATIC_BASE_URL + data['imgs']
+    result = word_matcher.match_words(bg_url, data['ques'])
     logger.debug(f"文字点选识别结果: {result}")
 
     obj = {
@@ -78,7 +85,7 @@ def get_w(data, captcha_id):
 
 
 def parse_response(response_text):
-    json_str = re.sub(r'^geetest_\d+\(|\);?$', '', response_text)
+    json_str = re.sub(r'^(geetest|botion)_\d+\(|\);?$', '', response_text)
     result = json.loads(json_str)
     if result.get('status') != 'success':
         raise Exception(f"请求失败: {result.get('msg', result)}")
@@ -86,41 +93,46 @@ def parse_response(response_text):
 
 
 def load_first(risk_type, captcha_id):
-    params = {'callback': f'geetest_{int(time.time() * 1000)}', 'captcha_id': captcha_id,
-              'challenge': generate_uuid(), 'client_type': 'web', 'risk_type': risk_type, 'lang': 'zho'}
-    resp = session.get('https://bcaptcha.botion.com/load', params=params,
-                       headers={'User-Agent': 'Mozilla/5.0', 'Referer': 'https://gt4.geetest.com/'})
+    params = {'callback': f'botion_{int(time.time() * 1000)}', 'captcha_id': captcha_id,
+              'challenge': generate_uuid(), 'client_type': 'web', 'risk_type': risk_type, 'lang': LANG}
+    resp = session.get(LOAD_URL, params=params,
+                       headers={'User-Agent': 'Mozilla/5.0', 'Referer': REFERER})
     return parse_response(resp.text)
 
 
 def load_second(data, captcha_id):
-    params = {"callback": f"geetest_{int(time.time() * 1000)}", "captcha_id": captcha_id, "client_type": "web",
-              "lot_number": data['lot_number'], "pt": "1", "lang": "zho", "payload": data['payload'],
+    params = {"callback": f"botion_{int(time.time() * 1000)}", "captcha_id": captcha_id, "client_type": "web",
+              "lot_number": data['lot_number'], "pt": "1", "lang": LANG, "payload": data['payload'],
               "process_token": data['process_token'], "payload_protocol": "1"}
-    resp = session.get('https://bcaptcha.botion.com/load', params=params,
-                       headers={'User-Agent': 'Mozilla/5.0', 'Referer': 'https://gt4.geetest.com/'})
+    resp = session.get(LOAD_URL, params=params,
+                       headers={'User-Agent': 'Mozilla/5.0', 'Referer': REFERER})
     return parse_response(resp.text)
 
 
 def verify(data, w, captcha_id):
-    params = {"callback": f"geetest_{int(time.time() * 1000)}", "captcha_id": captcha_id, "client_type": "web",
+    params = {"callback": f"botion_{int(time.time() * 1000)}", "captcha_id": captcha_id, "client_type": "web",
               "lot_number": data['lot_number'], "payload": data['payload'], "process_token": data['process_token'],
               "payload_protocol": "1", "pt": "1", "w": w}
-    resp = session.get('https://bcaptcha.botion.com/verify', params=params,
-                       headers={'User-Agent': 'Mozilla/5.0', 'Referer': 'https://gt4.geetest.com/'})
+    resp = session.get(VERIFY_URL, params=params,
+                       headers={'User-Agent': 'Mozilla/5.0', 'Referer': REFERER})
     return parse_response(resp.text)
 
 
 def word_verify(captcha_id, risk_type='word'):
     global DYNAMIC_KV, DYNAMIC_RULES, word_matcher
     if not DYNAMIC_KV:
-        params = extract_dynamic_params(captcha_id)
+        params = extract_dynamic_params(
+            captcha_id, load_domain=LOAD_DOMAIN, static_domain=STATIC_DOMAIN,
+            js_filename=JS_FILENAME, referer=REFERER, lang=LANG)
         DYNAMIC_KV, DYNAMIC_RULES = params['first'], params['rules']
     if word_matcher is None:
-        base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        # 使用当前目录下的 model 文件夹
+        base_dir = os.path.dirname(os.path.abspath(__file__))
         word_matcher = WordMatcher(
-            yolo_model_path=os.path.join(base_dir, "model", "word", "yolo_word.onnx"),
-            resnet_model_path=os.path.join(base_dir, "model", "word", "siamese_word.onnx")
+            yolo_model_path=os.path.join(base_dir, "model", "yolo_word.onnx"),
+            resnet_model_path=os.path.join(base_dir, "model", "siamese_word.onnx"),
+            static_base_url=STATIC_BASE_URL,
+            referer=REFERER
         )
 
     res = load_first(risk_type, captcha_id)
@@ -140,7 +152,5 @@ def word_verify(captcha_id, risk_type='word'):
 
 if __name__ == '__main__':
     CAPTCHA_ID = '283ed0bd78efd3d7899888027e9a851f'
-    for i in range(1):
-        result = word_verify(CAPTCHA_ID)
-        logger.info(f"验证结果: {result}")
-
+    result = word_verify(CAPTCHA_ID)
+    logger.info(f"验证结果: {json.dumps(result)}")

@@ -1,7 +1,4 @@
-# -*- coding: utf-8 -*-
-"""
-极验4动态参数提取模块
-"""
+
 import requests
 import execjs
 import json
@@ -9,17 +6,25 @@ import re
 import time
 import random
 import os
+import sys
 from loguru import logger
 
-# 获取项目根目录（util 的上级目录）
-_BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+def _runtime_base_dir():
+    if getattr(sys, 'frozen', False):
+        return os.path.dirname(os.path.abspath(sys.executable))
+    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+# 获取项目根目录（优先使用 exe 所在目录）
+_BASE_DIR = _runtime_base_dir()
 
 
 class DynamicParamsExtractor:
     """极验第四代验证码动态参数提取类"""
 
-    def __init__(self, captcha_id, challenge=None, client_type='web', risk_type='slide', lang='zh', 
-                 load_domain="gcaptcha4.geetest.com", static_domain="static.geetest.com"):
+    def __init__(self, captcha_id, challenge=None, client_type='web', risk_type='word', lang='zh-cn',
+                 load_domain="bcaptcha.botion.com", static_domain="static.botion.com",
+                 js_filename="bcaptcha.js", referer="https://bcaptcha.botion.com/"):
         self.captcha_id = captcha_id
         self.challenge = challenge or self._generate_uuid()
         self.client_type = client_type
@@ -27,16 +32,17 @@ class DynamicParamsExtractor:
         self.lang = lang
         self.load_domain = load_domain
         self.static_domain = static_domain
+        self.js_filename = js_filename
         self.lot_number = None
         self.static_path = None
         self.js_url = None
         self.params = None
         self.load_url = f"https://{self.load_domain}/load"
-        self.callback_name = f"geetest_{int(time.time() * 1000) + random.randint(100, 999)}"
+        self.callback_name = f"botion_{int(time.time() * 1000) + random.randint(100, 999)}"
         self.headers = {
             'Accept': '*/*',
             'Accept-Language': 'zh-CN,zh;q=0.9',
-            'Referer': 'https://gt4.geetest.com/',
+            'Referer': referer,
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
         }
 
@@ -58,7 +64,7 @@ class DynamicParamsExtractor:
                 return False
             self.lot_number = data['data']['lot_number']
             self.static_path = data['data']['static_path']
-            self.js_url = f'https://{self.static_domain}{self.static_path}/js/gcaptcha4.js'
+            self.js_url = f'https://{self.static_domain}{self.static_path}/js/{self.js_filename}'
             return True
         except (KeyError, json.JSONDecodeError):
             return False
@@ -83,14 +89,14 @@ class DynamicParamsExtractor:
     def get_params_from_js(self, lot_js_path='lot.js'):
         if not self.js_url:
             if self.static_path:
-                self.js_url = f'https://{self.static_domain}{self.static_path}/js/gcaptcha4.js'
+                self.js_url = f'https://{self.static_domain}{self.static_path}/js/{self.js_filename}'
             else:
                 logger.error("缺少 static_path")
                 return None
 
         if not os.path.isabs(lot_js_path):
             lot_js_path = os.path.join(_BASE_DIR, lot_js_path)
-        gcaptcha4_path = os.path.join(_BASE_DIR, 'gcaptcha4.js')
+        gcaptcha4_path = os.path.join(_BASE_DIR, self.js_filename)
 
         try:
             js_content = requests.get(self.js_url, headers=self.headers, timeout=10).text
@@ -165,9 +171,12 @@ def compute_lot_dict(lot_number, rules):
     return result
 
 
-def extract_dynamic_params(captcha_id, lot_js_path='lot.js', load_domain="gcaptcha4.geetest.com", static_domain="static.geetest.com"):
-    """提取极验4动态加密参数"""
-    extractor = DynamicParamsExtractor(captcha_id=captcha_id, load_domain=load_domain, static_domain=static_domain)
+def extract_dynamic_params(captcha_id, lot_js_path='lot.js', load_domain="bcaptcha.botion.com",
+                           static_domain="static.botion.com", js_filename="bcaptcha.js",
+                           referer="https://bcaptcha.botion.com/", lang="zh-cn"):
+    """提取极验4动态加密参数 (国际版 botion)"""
+    extractor = DynamicParamsExtractor(captcha_id=captcha_id, load_domain=load_domain, static_domain=static_domain,
+                                       js_filename=js_filename, referer=referer, lang=lang)
     
     if not extractor.load_captcha_data():
         raise Exception("加载验证码初始化数据失败")
@@ -180,7 +189,7 @@ def extract_dynamic_params(captcha_id, lot_js_path='lot.js', load_domain="gcaptc
     return {'first': params.get('first', {}), 'rules': params.get('rules', {})}
 
 
-def extract_params_by_path(static_path, lot_js_path='lot.js', static_domain="static.geetest.com"):
+def extract_params_by_path(static_path, lot_js_path='lot.js', static_domain="static.botion.com"):
     """已知 static_path，直接下载 JS 并提取参数"""
     extractor = DynamicParamsExtractor(captcha_id="dummy", static_domain=static_domain)
     extractor.static_path = static_path
@@ -195,7 +204,7 @@ def extract_params_by_path(static_path, lot_js_path='lot.js', static_domain="sta
 
 if __name__ == '__main__':
     try:
-        res = extract_dynamic_params('8b4a2bef633eb0264367b3ba9fa1dd3d')
+        res = extract_dynamic_params('283ed0bd78efd3d7899888027e9a851f')
         print("提取成功:", json.dumps(res, indent=2, ensure_ascii=False))
     except Exception as e:
         print("测试失败:", e)

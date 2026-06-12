@@ -175,7 +175,7 @@ function getParams(jscode, lotNumber) {
 }
 
 
-let encode_file = "gcaptcha4.js"
+let encode_file = "bcaptcha.js"
 
 // 读取需要解码的js文件, 注意文件编码为utf-8格式
 let jscode = fs.readFileSync(encode_file, { encoding: "utf-8" });

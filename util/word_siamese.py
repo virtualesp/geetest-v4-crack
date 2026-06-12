@@ -6,25 +6,30 @@ from PIL import Image, ImageEnhance
 import requests
 from io import BytesIO
 import itertools
-from torchvision import transforms
 import traceback
 
 class WordMatcher:
-    def __init__(self, yolo_model_path: str, resnet_model_path: str):
+    def __init__(self, yolo_model_path: str, resnet_model_path: str,
+                 static_base_url: str = "https://static.botion.com/",
+                 referer: str = "https://bcaptcha.botion.com/"):
         """
-        初始化文字点选匹配器 (支持3或4个图标)
+        初始化文字点选匹配器 (支持3或4个图标) - 国际版(botion)定制
+
+        static_base_url: 图标/背景图的静态资源域名 (国际版为 static.botion.com)
+        referer: 下载图片时使用的 Referer
         """
         self.YOLO_MODEL_PATH = yolo_model_path
         self.RESNET_MODEL_PATH = resnet_model_path
+        self.static_base_url = static_base_url.rstrip('/') + '/'
 
         # 坐标转换参数
         self.COORD_SCALE_X = 300.0
         self.COORD_SCALE_Y = 200.0
         self.COORD_MULTIPLIER = 10000
 
-        # YOLO 配置
+        # YOLO 配置 (国际版 botion 字体较细, 阈值下调至 0.4 检测更稳定)
         self.YOLO_INPUT_SIZE = 320
-        self.CONF_THRESHOLD = 0.8
+        self.CONF_THRESHOLD = 0.4
         self.NMS_THRESHOLD = 0.45
 
         # Siamese 模型配置
@@ -33,7 +38,7 @@ class WordMatcher:
 
         # 请求头
         self.headers = {
-            "Referer": "https://gt4.geetest.com/",
+            "Referer": referer,
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36"
         }
 
@@ -44,12 +49,9 @@ class WordMatcher:
         # 初始化模型
         self._init_models()
 
-        # Siamese 标准预处理
-        self.siamese_transform = transforms.Compose([
-            transforms.Resize((self.RESNET_INPUT_SIZE, self.RESNET_INPUT_SIZE)),
-            transforms.ToTensor(),
-            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-        ])
+        # Siamese 标准预处理参数，等价替代 torchvision.transforms
+        self.mean = np.array([0.485, 0.456, 0.406], dtype=np.float32).reshape((3, 1, 1))
+        self.std = np.array([0.229, 0.224, 0.225], dtype=np.float32).reshape((3, 1, 1))
 
     def _init_models(self):
         """初始化YOLO和Siamese模型"""
@@ -114,8 +116,13 @@ class WordMatcher:
             image = enhancer.enhance(1.5)
             enhancer = ImageEnhance.Sharpness(image)
             image = enhancer.enhance(1.5)
-        tensor = self.siamese_transform(image)
-        return tensor.numpy().astype(np.float32)
+        image = image.resize((self.RESNET_INPUT_SIZE, self.RESNET_INPUT_SIZE), Image.BILINEAR)
+        if image.mode != 'RGB':
+            image = image.convert('RGB')
+        img_np = np.array(image, dtype=np.float32) / 255.0
+        tensor = img_np.transpose((2, 0, 1))
+        tensor = (tensor - self.mean) / self.std
+        return tensor.astype(np.float32)
 
     def _preprocess_icon(self, icon_bytes: bytes, enhance_contrast: bool = True) -> np.ndarray:
         icon = Image.open(BytesIO(icon_bytes))
@@ -164,7 +171,10 @@ class WordMatcher:
                     boxes.append([left, top, int(w), int(h)])
                     confidences.append(float(final_confidence))
         indices_np = cv2.dnn.NMSBoxes(boxes, confidences, self.CONF_THRESHOLD, self.NMS_THRESHOLD)
-        indices = indices_np.flatten().tolist() if indices_np is not None else []
+        if isinstance(indices_np, np.ndarray) and indices_np.size > 0:
+            indices = indices_np.flatten().tolist()
+        else:
+            indices = []
         if indices:
             indices_with_conf = [(idx, confidences[idx]) for idx in indices]
             indices_with_conf.sort(key=lambda x: x[1], reverse=True)
@@ -242,7 +252,7 @@ class WordMatcher:
         match_words("https://static.geetest.com/bg.jpg", ["/x1.png", "/x2.png", "/x3.png", "/x4.png"])
         """
         try:
-            base_url = "https://static.geetest.com/"
+            base_url = self.static_base_url
             bg_bytes = self._download_image(bg_url)
             icon_bytes_list = [self._download_image(base_url + q) for q in ques_list]
 
