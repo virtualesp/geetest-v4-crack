@@ -1,7 +1,7 @@
 # 依赖安装
 
 ```python
-pip3 install pycryptodome PyExecJS requests rsa flask loguru
+pip install pycryptodome PyExecJS requests rsa flask loguru
 # Windows安装
 pip install numpy opencv-python onnxruntime torch torchvision
 
